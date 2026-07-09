@@ -5,6 +5,9 @@ export interface Member {
   joinedAt: string;
 }
 
+/** confirmed = treasurer verified (counts in pot). claimed = "Nililipa!" awaiting check. */
+export type ContributionStatus = 'confirmed' | 'claimed' | 'rejected';
+
 export interface Contribution {
   id: string;
   memberId: string;
@@ -12,6 +15,13 @@ export interface Contribution {
   date: string;
   note: string;
   cycle: number;
+  /** Defaults to confirmed for legacy records. */
+  status: ContributionStatus;
+  /** M-Pesa confirmation code when available */
+  mpesaCode: string;
+  /** When a claim was confirmed or rejected */
+  resolvedAt?: string;
+  resolveNote?: string;
 }
 
 export interface Payout {
@@ -70,10 +80,12 @@ export interface PublicBoardSnapshot {
   updatedAt: string;
 }
 
+export type BoardMemberStatus = 'paid' | 'claimed' | 'pending';
+
 export interface PublicBoardMember {
   name: string;
   paid: number;
-  status: 'paid' | 'pending';
+  status: BoardMemberStatus;
   order: number;
   isNext: boolean;
 }

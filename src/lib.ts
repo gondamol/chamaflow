@@ -1,4 +1,12 @@
-import type { AppState, Chama, Contribution, Member, PublicBoardSnapshot } from './types';
+import type {
+  AppState,
+  BoardMemberStatus,
+  Chama,
+  Contribution,
+  ContributionStatus,
+  Member,
+  PublicBoardSnapshot,
+} from './types';
 
 const KEY = 'chamaflow_v1';
 
@@ -8,6 +16,10 @@ export function uid(p = 'id') {
 
 export function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+export function nowIso() {
+  return new Date().toISOString();
 }
 
 export function money(n: number, currency = 'KES') {
@@ -21,7 +33,11 @@ export function money(n: number, currency = 'KES') {
 export function load(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw) as AppState;
+    if (raw) {
+      const parsed = migrateState(JSON.parse(raw) as AppState);
+      save(parsed);
+      return parsed;
+    }
   } catch {
     /* */
   }
@@ -34,14 +50,70 @@ export function save(state: AppState) {
   localStorage.setItem(KEY, JSON.stringify(state));
 }
 
+/** Backfill contribution status / M-Pesa fields for older localStorage data. */
+export function migrateState(state: AppState): AppState {
+  return {
+    ...state,
+    chamas: (state.chamas || []).map((c) => ({
+      ...c,
+      contributions: (c.contributions || []).map((contrib) => normalizeContribution(contrib)),
+    })),
+  };
+}
+
+function normalizeContribution(c: Partial<Contribution> & Pick<Contribution, 'id' | 'memberId' | 'amount' | 'date' | 'note' | 'cycle'>): Contribution {
+  const status = (c.status as ContributionStatus | undefined) || 'confirmed';
+  return {
+    id: c.id,
+    memberId: c.memberId,
+    amount: c.amount,
+    date: c.date,
+    note: c.note || '',
+    cycle: c.cycle,
+    status: status === 'claimed' || status === 'rejected' || status === 'confirmed' ? status : 'confirmed',
+    mpesaCode: c.mpesaCode || '',
+    resolvedAt: c.resolvedAt,
+    resolveNote: c.resolveNote,
+  };
+}
+
 function seed(): AppState {
   const m1: Member = { id: uid('m'), name: 'Amina Wanjiku', phone: '0712000001', joinedAt: today() };
   const m2: Member = { id: uid('m'), name: 'James Otieno', phone: '0712000002', joinedAt: today() };
   const m3: Member = { id: uid('m'), name: 'Grace Njeri', phone: '0712000003', joinedAt: today() };
   const members = [m1, m2, m3];
   const contributions: Contribution[] = [
-    { id: uid('c'), memberId: m1.id, amount: 2000, date: today(), note: 'Cycle 1', cycle: 1 },
-    { id: uid('c'), memberId: m2.id, amount: 2000, date: today(), note: 'Cycle 1', cycle: 1 },
+    {
+      id: uid('c'),
+      memberId: m1.id,
+      amount: 2000,
+      date: today(),
+      note: 'Cycle 1',
+      cycle: 1,
+      status: 'confirmed',
+      mpesaCode: 'QWE1DEMO01',
+    },
+    {
+      id: uid('c'),
+      memberId: m2.id,
+      amount: 2000,
+      date: today(),
+      note: 'Cycle 1',
+      cycle: 1,
+      status: 'confirmed',
+      mpesaCode: 'QWE1DEMO02',
+    },
+    // Demo claim: Grace says she paid — treasurer must confirm (Nililipa dispute path)
+    {
+      id: uid('c'),
+      memberId: m3.id,
+      amount: 2000,
+      date: today(),
+      note: 'Member claims paid via M-Pesa',
+      cycle: 1,
+      status: 'claimed',
+      mpesaCode: 'CLAIMDEMO3',
+    },
   ];
   const chama: Chama = {
     id: uid('ch'),
@@ -64,17 +136,104 @@ function seed(): AppState {
   return { chamas: [chama], activeChamaId: chama.id };
 }
 
+export function isConfirmed(c: Contribution): boolean {
+  return (c.status || 'confirmed') === 'confirmed';
+}
+
+export function isClaimed(c: Contribution): boolean {
+  return c.status === 'claimed';
+}
+
+/** Confirmed contributions only — soft ledger truth for pot / paid counts. */
 export function memberPaidInCycle(chama: Chama, memberId: string, cycle: number) {
   return chama.contributions
-    .filter((c) => c.memberId === memberId && c.cycle === cycle)
+    .filter((c) => c.memberId === memberId && c.cycle === cycle && isConfirmed(c))
     .reduce((s, c) => s + c.amount, 0);
 }
 
+/** Amount in open "claims paid" for this cycle (not yet confirmed). */
+export function memberClaimedInCycle(chama: Chama, memberId: string, cycle: number) {
+  return chama.contributions
+    .filter((c) => c.memberId === memberId && c.cycle === cycle && isClaimed(c))
+    .reduce((s, c) => s + c.amount, 0);
+}
+
+export function memberCycleStatus(chama: Chama, memberId: string): BoardMemberStatus {
+  const paid = memberPaidInCycle(chama, memberId, chama.currentCycle);
+  if (paid >= chama.contributionAmount) return 'paid';
+  if (memberClaimedInCycle(chama, memberId, chama.currentCycle) > 0) return 'claimed';
+  return 'pending';
+}
+
+export function pendingClaims(chama: Chama, cycle = chama.currentCycle): Contribution[] {
+  return chama.contributions.filter((c) => c.cycle === cycle && isClaimed(c));
+}
+
 export function potTotal(chama: Chama) {
-  const inAmt = chama.contributions.reduce((s, c) => s + c.amount, 0);
+  const inAmt = chama.contributions.filter(isConfirmed).reduce((s, c) => s + c.amount, 0);
   const outAmt = chama.payouts.reduce((s, c) => s + c.amount, 0);
   const fines = chama.fines.filter((f) => f.paid).reduce((s, f) => s + f.amount, 0);
   return inAmt + fines - outAmt;
+}
+
+export function confirmContribution(
+  chama: Chama,
+  contributionId: string,
+  opts?: { mpesaCode?: string; note?: string },
+): Chama {
+  return {
+    ...chama,
+    contributions: chama.contributions.map((c) => {
+      if (c.id !== contributionId) return c;
+      return {
+        ...c,
+        status: 'confirmed' as const,
+        mpesaCode: opts?.mpesaCode !== undefined ? opts.mpesaCode.trim() : c.mpesaCode,
+        note: opts?.note !== undefined ? opts.note : c.note,
+        resolvedAt: nowIso(),
+        resolveNote: 'Confirmed by treasurer',
+      };
+    }),
+  };
+}
+
+export function rejectClaim(
+  chama: Chama,
+  contributionId: string,
+  reason = 'Could not verify payment',
+): Chama {
+  return {
+    ...chama,
+    contributions: chama.contributions.map((c) => {
+      if (c.id !== contributionId) return c;
+      return {
+        ...c,
+        status: 'rejected' as const,
+        resolvedAt: nowIso(),
+        resolveNote: reason,
+      };
+    }),
+  };
+}
+
+export function makeContribution(input: {
+  memberId: string;
+  amount: number;
+  cycle: number;
+  note?: string;
+  mpesaCode?: string;
+  status: ContributionStatus;
+}): Contribution {
+  return {
+    id: uid('c'),
+    memberId: input.memberId,
+    amount: input.amount,
+    date: today(),
+    note: input.note || '',
+    cycle: input.cycle,
+    status: input.status,
+    mpesaCode: (input.mpesaCode || '').trim().toUpperCase(),
+  };
 }
 
 /** Payout order as member list (falls back to join order). */
@@ -128,9 +287,7 @@ export function skipNextPayout(chama: Chama): Chama {
   const order = membersInPayoutOrder(chama).map((m) => m.id);
   const waiting = order.filter((id) => !paidOut.has(id) && id !== next.id);
   const done = order.filter((id) => paidOut.has(id));
-  // New order: already-received, remaining waiters, then skipped person
   const newOrder = [...done, ...waiting, next.id];
-  // Preserve members not in order (shouldn't happen)
   for (const id of order) {
     if (!newOrder.includes(id)) newOrder.push(id);
   }
@@ -147,6 +304,7 @@ export function swapPayoutOrder(chama: Chama, aId: string, bId: string): Chama {
   return { ...chama, payoutOrder: next };
 }
 
+/** Not fully confirmed for this cycle (claims still count as unpaid for pot). */
 export function unpaidMembers(chama: Chama): Member[] {
   return chama.members.filter(
     (m) => memberPaidInCycle(chama, m.id, chama.currentCycle) < chama.contributionAmount,
@@ -177,6 +335,7 @@ export function paymentReminderMessage(chama: Chama, memberName: string): string
     `Reminder from *${chama.name}*:\n` +
     `Please pay *${amount}* for *Cycle ${chama.currentCycle}*.` +
     `${tillLine}\n\n` +
+    `After paying, send your M-Pesa code so the treasurer can confirm.\n\n` +
     `Asante! — via ChamaFlow`
   );
 }
@@ -190,7 +349,16 @@ export function groupReminderMessage(chama: Chama, unpaid: Member[]): string {
     `Pending contribution (*${amount}*):` +
     `\n${names || '• (none)'}` +
     `${tillLine}\n\n` +
-    `Please pay so we can close the cycle. Asante 🙏`
+    `Please pay and share your M-Pesa code. Asante 🙏`
+  );
+}
+
+export function claimFollowUpMessage(chama: Chama, memberName: string, mpesaCode: string): string {
+  return (
+    `Habari ${memberName},\n\n` +
+    `We received your claim for *${chama.name}* Cycle ${chama.currentCycle}` +
+    (mpesaCode ? ` (code *${mpesaCode}*).` : '.') +
+    `\nTreasurer is verifying — you'll see *Paid* on the cycle board once confirmed.\n\nAsante!`
   );
 }
 
@@ -200,7 +368,6 @@ export function whatsappUrl(phone: string | null | undefined, message: string): 
     const n = normalizePhoneForWhatsApp(phone);
     if (n) return `https://wa.me/${n}?text=${text}`;
   }
-  // Opens WhatsApp with message only (user picks contact)
   return `https://wa.me/?text=${text}`;
 }
 
@@ -210,7 +377,6 @@ export function buildPublicBoard(chama: Chama): PublicBoardSnapshot {
   const next = nextPayoutMember(chama);
   const ordered = membersInPayoutOrder(chama);
   const orderIds = ordered.map((m) => m.id);
-  // Include members not yet in order
   const rest = chama.members.filter((m) => !orderIds.includes(m.id));
   const all = [...ordered, ...rest];
 
@@ -225,12 +391,12 @@ export function buildPublicBoard(chama: Chama): PublicBoardSnapshot {
     nextOrder: next ? orderIds.indexOf(next.id) + 1 : null,
     members: all.map((m) => {
       const paid = memberPaidInCycle(chama, m.id, chama.currentCycle);
-      const ok = paid >= chama.contributionAmount;
+      const status = memberCycleStatus(chama, m.id);
       const order = orderIds.indexOf(m.id);
       return {
         name: m.name,
         paid,
-        status: ok ? ('paid' as const) : ('pending' as const),
+        status,
         order: order >= 0 ? order + 1 : 0,
         isNext: next?.id === m.id,
       };
