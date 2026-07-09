@@ -18,8 +18,12 @@ import {
   AlertCircle,
   ShieldCheck,
   X,
+  Calendar,
+  Smartphone,
+  BookOpen,
+  Sparkles,
 } from 'lucide-react';
-import type { Chama, Fine, Member, Payout, PublicBoardSnapshot } from './types';
+import type { Chama, CycleFrequency, Fine, Member, Payout, PublicBoardSnapshot } from './types';
 import {
   load,
   save,
@@ -48,6 +52,11 @@ import {
   makeContribution,
   confirmContribution,
   rejectClaim,
+  buildPayoutCalendar,
+  receivedThisRoundSlots,
+  formatMeetingDate,
+  frequencyLabel,
+  treasurerCtaUrl,
 } from './lib';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -226,6 +235,26 @@ function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
         </ul>
       </section>
 
+      {board.upcoming && board.upcoming.length > 0 ? (
+        <section className="card">
+          <h2 style={{ fontSize: '1.1rem' }}>
+            <Calendar size={18} style={{ verticalAlign: 'middle' }} /> Upcoming payouts
+          </h2>
+          <p className="muted">Merry-go-round schedule from the treasurer&apos;s calendar.</p>
+          <ul className="cal-list">
+            {board.upcoming.map((u, i) => (
+              <li key={`${u.name}-${u.date}-${i}`} className={`cal-row ${u.isNext ? 'is-next' : ''}`}>
+                <div>
+                  <strong>{u.name}</strong>
+                  {u.isNext ? <span className="badge badge-next">Next</span> : null}
+                </div>
+                <span className="muted">{formatMeetingDate(u.date)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <p className="board-footer muted">
         Powered by ChamaFlow — WhatsApp-native group trust. Not a bank.
       </p>
@@ -270,6 +299,8 @@ function TreasurerApp() {
       contributionAmount: 1000,
       currency: 'KES',
       cycleDay: 1,
+      cycleFrequency: 'weekly',
+      nextMeetingDate: today(),
       currentCycle: 1,
       mpesaTill: '',
       adminName: '',
@@ -375,24 +406,154 @@ function HomeView({
   onOpen: (id: string) => void;
   onCreate: () => void;
 }) {
+  const scrollToGroups = () => {
+    document.getElementById('your-groups')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
-    <div>
-      <section className="hero card">
+    <div className="landing">
+      <section className="hero card hero-landing">
+        <p className="board-kicker">For Kenyan &amp; African chamas</p>
         <h1>Banks digitize money. We digitize the meeting.</h1>
         <p className="hero-lead">
-          Soft ledger + public cycle board for informal chamas. Track who paid, who&apos;s next on the
-          merry-go-round, and nudge members on WhatsApp — no KYC, no bank wallet required.
+          WhatsApp-native group trust for merry-go-rounds and table banking. Soft ledger first — no KYC,
+          no bank wallet required.
+        </p>
+        <p className="hero-swahili">
+          <em>Rekodi za chama bila daftari. Board ya cycle + vikumbusho vya WhatsApp.</em>
         </p>
         <div className="toolbar" style={{ marginBottom: 0 }}>
           <button type="button" className="btn btn-primary" onClick={onCreate}>
-            <Plus size={16} /> Create chama (60 seconds)
+            <Plus size={16} /> Create chama — 60 seconds
           </button>
+          <a className="btn btn-secondary" href={treasurerCtaUrl('en')} target="_blank" rel="noreferrer">
+            <MessageCircle size={16} /> WhatsApp us
+          </a>
+          {chamas.length > 0 ? (
+            <button type="button" className="btn btn-secondary" onClick={scrollToGroups}>
+              Your groups
+            </button>
+          ) : null}
         </div>
       </section>
 
-      <h2 style={{ margin: '1rem 0 0.6rem' }}>Your groups</h2>
+      <section className="grid-3 feature-grid">
+        <div className="card feature-card">
+          <Share2 size={22} className="feature-icon" />
+          <h3>Public cycle board</h3>
+          <p className="muted">Share a link: who paid, who claims, who&apos;s next, Till. Kills notebook fights.</p>
+        </div>
+        <div className="card feature-card">
+          <MessageCircle size={22} className="feature-icon" />
+          <h3>WhatsApp reminders</h3>
+          <p className="muted">One-tap nudge with amount + Till. Chat stays on WhatsApp — we don&apos;t rebuild it.</p>
+        </div>
+        <div className="card feature-card">
+          <Calendar size={22} className="feature-icon" />
+          <h3>Merry-go-round calendar</h3>
+          <p className="muted">Order, next highlighted, skip/swap, and who gets paid on which meeting date.</p>
+        </div>
+        <div className="card feature-card">
+          <ShieldCheck size={22} className="feature-icon" />
+          <h3>Payment confirm</h3>
+          <p className="muted">M-Pesa code + “Nililipa” claims. Only confirmed money enters the pot.</p>
+        </div>
+        <div className="card feature-card">
+          <BookOpen size={22} className="feature-icon" />
+          <h3>Meeting statements</h3>
+          <p className="muted">PDF for the next meeting. Soft ledger truth without a bank app.</p>
+        </div>
+        <div className="card feature-card">
+          <Smartphone size={22} className="feature-icon" />
+          <h3>Phone-first</h3>
+          <p className="muted">Built for mid-range phones. KES. Clear English — Swahili where it helps.</p>
+        </div>
+      </section>
+
+      <section className="card vs-card">
+        <h2 style={{ fontSize: '1.15rem' }}>Not a mini-bank app</h2>
+        <div className="vs-grid">
+          <div>
+            <div className="stat-label">Bank chama apps</div>
+            <ul className="vs-list">
+              <li>KYC + selfie first</li>
+              <li>Wallet / custody first</li>
+              <li>Best for formalising</li>
+            </ul>
+          </div>
+          <div>
+            <div className="stat-label">ChamaFlow</div>
+            <ul className="vs-list vs-list-us">
+              <li>Group + rules in 60s</li>
+              <li>M-Pesa / cash soft ledger</li>
+              <li>Informal WhatsApp groups</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section className="card" id="pricing">
+        <h2 style={{ fontSize: '1.15rem' }}>
+          <Sparkles size={18} style={{ verticalAlign: 'middle' }} /> Pricing
+        </h2>
+        <p className="muted">Free for informal groups. Pro when you grow — not a tax on trust.</p>
+        <div className="grid-2 pricing-grid">
+          <div className="price-tier">
+            <h3>Free</h3>
+            <p className="price-amount">KSh 0</p>
+            <ul className="price-features">
+              <li>Soft ledger + public board</li>
+              <li>Merry-go-round calendar</li>
+              <li>WhatsApp reminders</li>
+              <li>Payment claims</li>
+              <li>Small groups (local device)</li>
+            </ul>
+            <button type="button" className="btn btn-primary" onClick={onCreate}>
+              Start free
+            </button>
+          </div>
+          <div className="price-tier price-tier-pro">
+            <h3>Pro</h3>
+            <p className="price-amount">
+              KSh 299–499<span className="muted">/group/mo</span>
+            </p>
+            <ul className="price-features">
+              <li>Multi-admin (treasurer + secretary)</li>
+              <li>Cloud sync (coming)</li>
+              <li>Table banking loans (coming)</li>
+              <li>Long history + bulk tools</li>
+              <li>Setup training available</li>
+            </ul>
+            <a className="btn btn-secondary" href={treasurerCtaUrl('en')} target="_blank" rel="noreferrer">
+              <MessageCircle size={16} /> Ask on WhatsApp
+            </a>
+          </div>
+        </div>
+        <p className="muted" style={{ marginBottom: 0, marginTop: '0.75rem', fontSize: '0.88rem' }}>
+          Setup / treasurer training: cash fee (like a short workshop) — ask on WhatsApp.
+        </p>
+      </section>
+
+      <section className="card cta-swahili">
+        <h2 style={{ fontSize: '1.1rem' }}>Kwa mweka hazina (treasurers)</h2>
+        <p className="muted">
+          Anza bure. Share link ya cycle board kwenye WhatsApp group. Hakuna ID selfie.
+        </p>
+        <div className="toolbar" style={{ marginBottom: 0 }}>
+          <button type="button" className="btn btn-primary" onClick={onCreate}>
+            Unda chama
+          </button>
+          <a className="btn btn-secondary" href={treasurerCtaUrl('sw')} target="_blank" rel="noreferrer">
+            <MessageCircle size={16} /> WhatsApp (Kiswahili)
+          </a>
+        </div>
+      </section>
+
+      <h2 id="your-groups" style={{ margin: '1.25rem 0 0.6rem' }}>
+        Your groups
+      </h2>
       {chamas.length === 0 ? (
-        <div className="empty card">No chamas yet. Create your first group.</div>
+        <div className="empty card">No chamas yet. Create your first group in under a minute.</div>
       ) : (
         chamas.map((c) => (
           <button
@@ -406,7 +567,8 @@ function HomeView({
               <div>
                 <h3 style={{ margin: 0 }}>{c.name}</h3>
                 <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-                  {c.members.length} members · Cycle {c.currentCycle} · Pot {money(potTotal(c), c.currency)}
+                  {c.members.length} members · Cycle {c.currentCycle} ·{' '}
+                  {frequencyLabel(c.cycleFrequency || 'weekly')} · Pot {money(potTotal(c), c.currency)}
                 </p>
               </div>
               <span className="badge">Open</span>
@@ -793,6 +955,9 @@ function MerryGoRoundCard({
 }) {
   const ordered = membersInPayoutOrder(chama);
   const next = nextPayoutMember(chama);
+  const calendar = buildPayoutCalendar(chama, Math.max(ordered.length, 6));
+  const receivedSlots = receivedThisRoundSlots(chama);
+  const freq = (chama.cycleFrequency || 'weekly') as CycleFrequency;
 
   if (chama.members.length === 0) {
     return (
@@ -871,6 +1036,81 @@ function MerryGoRoundCard({
           );
         })}
       </ol>
+
+      <div className="cal-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Calendar size={18} /> Cycle calendar
+          </h3>
+          <span className="badge">{frequencyLabel(freq)}</span>
+        </div>
+        <p className="muted" style={{ margin: '0.35rem 0 0.65rem' }}>
+          Who gets the pot on which meeting — share via the public board after you set dates.
+        </p>
+        <div className="grid-2" style={{ marginBottom: '0.75rem' }}>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Meeting frequency</label>
+            <select
+              value={freq}
+              onChange={(e) =>
+                onUpdate(chama.id, (c) => ({
+                  ...c,
+                  cycleFrequency: e.target.value as CycleFrequency,
+                }))
+              }
+            >
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Every 2 weeks</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Next meeting date</label>
+            <input
+              type="date"
+              value={(chama.nextMeetingDate || today()).slice(0, 10)}
+              onChange={(e) =>
+                onUpdate(chama.id, (c) => ({
+                  ...c,
+                  nextMeetingDate: e.target.value || today(),
+                }))
+              }
+            />
+          </div>
+        </div>
+
+        {receivedSlots.length > 0 ? (
+          <div style={{ marginBottom: '0.5rem' }}>
+            <div className="stat-label" style={{ marginBottom: 4 }}>Received this round</div>
+            <ul className="cal-list">
+              {receivedSlots.map((s) => (
+                <li key={`r-${s.memberId}`} className="cal-row is-received">
+                  <div>
+                    <strong>{s.memberName}</strong>
+                    <span className="badge badge-ok">Received</span>
+                  </div>
+                  <span className="muted">{s.expectedDate ? formatMeetingDate(s.expectedDate) : '—'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <div className="stat-label" style={{ marginBottom: 4 }}>Upcoming turns</div>
+        <ul className="cal-list">
+          {calendar.map((s) => (
+            <li key={`${s.memberId}-${s.index}`} className={`cal-row ${s.status === 'next' ? 'is-next' : ''}`}>
+              <div>
+                <strong>{s.memberName}</strong>
+                {s.status === 'next' ? <span className="badge badge-next">Next</span> : (
+                  <span className="badge">{s.label}</span>
+                )}
+              </div>
+              <span className="muted">{formatMeetingDate(s.expectedDate)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
