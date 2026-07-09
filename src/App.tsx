@@ -22,6 +22,9 @@ import {
   Smartphone,
   BookOpen,
   Sparkles,
+  HandCoins,
+  Landmark,
+  Cloud,
 } from 'lucide-react';
 import type { Chama, CycleFrequency, Fine, Member, Payout, PublicBoardSnapshot } from './types';
 import {
@@ -57,11 +60,15 @@ import {
   formatMeetingDate,
   frequencyLabel,
   treasurerCtaUrl,
+  emptyChamaDefaults,
 } from './lib';
+import { pullChamaFromCloud } from './cloud';
+import { loanSummary } from './loans';
+import { CloudSyncPanel, LoansView, PartnersView } from './panels';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-type View = 'home' | 'chama' | 'members' | 'contribute' | 'payout' | 'statement';
+type View = 'home' | 'chama' | 'members' | 'contribute' | 'payout' | 'statement' | 'loans' | 'partners';
 
 export default function App() {
   const [route, setRoute] = useState(parseHashRoute);
@@ -75,7 +82,58 @@ export default function App() {
   if (route.type === 'board') {
     return <PublicBoardPage token={route.token} />;
   }
+  if (route.type === 'live') {
+    return <LiveBoardPage code={route.code} />;
+  }
   return <TreasurerApp />;
+}
+
+function LiveBoardPage({ code }: { code: string }) {
+  const [board, setBoard] = useState<PublicBoardSnapshot | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const res = await pullChamaFromCloud(code);
+      if (cancelled) return;
+      setLoading(false);
+      if (!res.ok) {
+        setError(res.error);
+        setBoard(null);
+        return;
+      }
+      setBoard(buildPublicBoard(res.chama));
+      setError('');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  if (loading) {
+    return (
+      <div className="shell board-shell">
+        <div className="card empty">Loading live board…</div>
+      </div>
+    );
+  }
+  if (error || !board) {
+    return (
+      <div className="shell board-shell">
+        <div className="card empty">
+          <h2>Live board unavailable</h2>
+          <p className="muted">{error || 'Unknown error'}</p>
+          <a className="btn btn-primary" href="#/">
+            Open ChamaFlow
+          </a>
+        </div>
+      </div>
+    );
+  }
+  return <PublicBoardView board={board} live />;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -120,7 +178,7 @@ function statusLabel(status: string) {
   return 'Pending';
 }
 
-function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
+function PublicBoardView({ board, live }: { board: PublicBoardSnapshot; live?: boolean }) {
   const paidCount = board.members.filter((m) => m.status === 'paid').length;
   const claimedCount = board.members.filter((m) => m.status === 'claimed').length;
   const pending = board.members.filter((m) => m.status === 'pending');
@@ -138,11 +196,11 @@ function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
           <span className="mark">C</span>
           ChamaFlow
         </div>
-        <span className="badge">Public board · read only</span>
+        <span className="badge">{live ? 'Live cloud board · read only' : 'Public board · read only'}</span>
       </header>
 
       <section className="card board-hero">
-        <p className="board-kicker">Cycle trust board</p>
+        <p className="board-kicker">{live ? 'Live cycle board' : 'Cycle trust board'}</p>
         <h1 style={{ fontSize: '1.55rem' }}>{board.name}</h1>
         <p className="muted" style={{ marginBottom: 0 }}>
           Cycle <strong>{board.cycle}</strong> · Contribution{' '}
@@ -294,25 +352,28 @@ function TreasurerApp() {
     if (!name?.trim()) return;
     const c: Chama = {
       id: uid('ch'),
-      name: name.trim(),
-      description: '',
-      contributionAmount: 1000,
-      currency: 'KES',
-      cycleDay: 1,
-      cycleFrequency: 'weekly',
-      nextMeetingDate: today(),
-      currentCycle: 1,
-      mpesaTill: '',
-      adminName: '',
-      adminPhone: '',
-      members: [],
-      contributions: [],
-      payouts: [],
-      fines: [],
-      payoutOrder: [],
+      ...emptyChamaDefaults(name),
       createdAt: new Date().toISOString(),
     };
     setState((s) => ({ chamas: [c, ...s.chamas], activeChamaId: c.id }));
+    setView('chama');
+  };
+
+  const importCloudChama = (remote: Chama) => {
+    const c: Chama = { ...remote, id: remote.id || uid('ch') };
+    setState((s) => {
+      const exists = s.chamas.find(
+        (x) => x.cloudShareCode && x.cloudShareCode === c.cloudShareCode,
+      );
+      if (exists) {
+        return {
+          ...s,
+          chamas: s.chamas.map((x) => (x.id === exists.id ? { ...c, id: exists.id } : x)),
+          activeChamaId: exists.id,
+        };
+      }
+      return { chamas: [c, ...s.chamas], activeChamaId: c.id };
+    });
     setView('chama');
   };
 
@@ -344,6 +405,12 @@ function TreasurerApp() {
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setView('statement')}>
                 <FileText size={14} /> Statement
               </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setView('loans')}>
+                <HandCoins size={14} /> Loans
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setView('partners')}>
+                <Landmark size={14} /> Pay
+              </button>
             </>
           )}
           <button type="button" className="btn btn-primary btn-sm" onClick={createChama}>
@@ -361,10 +428,25 @@ function TreasurerApp() {
         </div>
       )}
 
-      {view === 'home' && <HomeView chamas={state.chamas} onOpen={openChama} onCreate={createChama} />}
+      {view === 'home' && (
+        <HomeView
+          chamas={state.chamas}
+          onOpen={openChama}
+          onCreate={createChama}
+          onJoinCloud={importCloudChama}
+          setFlash={setFlash}
+        />
+      )}
       {view !== 'home' && chama && (
         <>
-          {view === 'chama' && <ChamaDash chama={chama} onUpdate={updateChama} setFlash={setFlash} />}
+          {view === 'chama' && (
+            <ChamaDash
+              chama={chama}
+              onUpdate={updateChama}
+              setFlash={setFlash}
+              onImportChama={importCloudChama}
+            />
+          )}
           {view === 'members' && <MembersView chama={chama} onUpdate={updateChama} />}
           {view === 'contribute' && (
             <ContributeView
@@ -391,6 +473,10 @@ function TreasurerApp() {
             />
           )}
           {view === 'statement' && <StatementView chama={chama} />}
+          {view === 'loans' && <LoansView chama={chama} onUpdate={updateChama} setFlash={setFlash} />}
+          {view === 'partners' && (
+            <PartnersView chama={chama} onUpdate={updateChama} setFlash={setFlash} />
+          )}
         </>
       )}
     </div>
@@ -401,13 +487,33 @@ function HomeView({
   chamas,
   onOpen,
   onCreate,
+  onJoinCloud,
+  setFlash,
 }: {
   chamas: Chama[];
   onOpen: (id: string) => void;
   onCreate: () => void;
+  onJoinCloud: (c: Chama) => void;
+  setFlash: (s: string) => void;
 }) {
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
+
   const scrollToGroups = () => {
     document.getElementById('your-groups')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const joinCloud = async () => {
+    if (!joinCode.trim()) return;
+    setJoining(true);
+    const res = await pullChamaFromCloud(joinCode);
+    setJoining(false);
+    if (!res.ok) {
+      setFlash(res.error);
+      return;
+    }
+    onJoinCloud(res.chama);
+    setFlash(`Joined ${res.chama.name}`);
   };
 
   return (
@@ -503,10 +609,10 @@ function HomeView({
             <p className="price-amount">KSh 0</p>
             <ul className="price-features">
               <li>Soft ledger + public board</li>
-              <li>Merry-go-round calendar</li>
-              <li>WhatsApp reminders</li>
-              <li>Payment claims</li>
-              <li>Small groups (local device)</li>
+              <li>Merry-go-round + loans (basic)</li>
+              <li>WhatsApp + claims</li>
+              <li>STK demo mode</li>
+              <li>Local device (cloud optional)</li>
             </ul>
             <button type="button" className="btn btn-primary" onClick={onCreate}>
               Start free
@@ -518,9 +624,9 @@ function HomeView({
               KSh 299–499<span className="muted">/group/mo</span>
             </p>
             <ul className="price-features">
-              <li>Multi-admin (treasurer + secretary)</li>
-              <li>Cloud sync (coming)</li>
-              <li>Table banking loans (coming)</li>
+              <li>Multi-admin cloud sync</li>
+              <li>Table banking loans</li>
+              <li>M-Pesa STK when configured</li>
               <li>Long history + bulk tools</li>
               <li>Setup training available</li>
             </ul>
@@ -546,6 +652,33 @@ function HomeView({
           <a className="btn btn-secondary" href={treasurerCtaUrl('sw')} target="_blank" rel="noreferrer">
             <MessageCircle size={16} /> WhatsApp (Kiswahili)
           </a>
+        </div>
+      </section>
+
+      <section className="card">
+        <h3 style={{ margin: 0 }}>
+          <Cloud size={18} style={{ verticalAlign: 'middle' }} /> Join chama on this phone
+        </h3>
+        <p className="muted">Secretary / co-admin: enter the cloud share code from the treasurer.</p>
+        <div className="join-row">
+          <div className="field" style={{ marginBottom: 0, flex: 1 }}>
+            <label>Share code</label>
+            <input
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              placeholder="e.g. AB3K7M2P"
+              maxLength={12}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ alignSelf: 'flex-end' }}
+            disabled={joining || !joinCode.trim()}
+            onClick={joinCloud}
+          >
+            {joining ? 'Joining…' : 'Join group'}
+          </button>
         </div>
       </section>
 
@@ -584,13 +717,16 @@ function ChamaDash({
   chama,
   onUpdate,
   setFlash,
+  onImportChama,
 }: {
   chama: Chama;
   onUpdate: (id: string, fn: (c: Chama) => Chama) => void;
   setFlash: (s: string) => void;
+  onImportChama: (c: Chama) => void;
 }) {
   const pot = potTotal(chama);
   const next = nextPayoutMember(chama);
+  const loans = loanSummary(chama);
   const paidCount = chama.members.filter(
     (m) => memberPaidInCycle(chama, m.id, chama.currentCycle) >= chama.contributionAmount,
   ).length;
@@ -645,6 +781,18 @@ function ChamaDash({
             <div className="stat-value" style={{ fontSize: '1.05rem' }}>{next?.name || '—'}</div>
           </div>
         </div>
+        {loans.activeCount > 0 || loans.outstanding > 0 ? (
+          <p className="muted" style={{ margin: '0.65rem 0 0', fontSize: '0.9rem' }}>
+            <HandCoins size={14} style={{ verticalAlign: 'middle' }} /> Loans out:{' '}
+            <strong>{money(loans.outstanding, chama.currency)}</strong> ({loans.activeCount} active)
+            {chama.cloudShareCode ? (
+              <>
+                {' '}
+                · <Cloud size={14} style={{ verticalAlign: 'middle' }} /> synced
+              </>
+            ) : null}
+          </p>
+        ) : null}
 
         <div className="share-strip">
           <div>
@@ -690,6 +838,13 @@ function ChamaDash({
           />
         </div>
       </div>
+
+      <CloudSyncPanel
+        chama={chama}
+        onUpdate={onUpdate}
+        onImportChama={onImportChama}
+        setFlash={setFlash}
+      />
 
       <ClaimsQueueCard chama={chama} onUpdate={onUpdate} setFlash={setFlash} />
 

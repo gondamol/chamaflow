@@ -302,6 +302,22 @@ th { background: #faf7f2; color: var(--muted); font-size: 0.78rem; text-transfor
   border-color: #fed7aa;
 }
 
+/* Cloud / loans / partners */
+.cloud-card { border-color: #bfdbfe; background: linear-gradient(180deg, #eff6ff 0%, var(--surface) 50%); }
+.join-row {
+  display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end;
+  margin-top: 0.85rem; padding-top: 0.75rem; border-top: 1px solid var(--line);
+}
+.partner-pills {
+  display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+  padding: 0.3rem; background: #f5f5f4; border-radius: 12px; border: 1px solid var(--line);
+}
+.pay-instructions {
+  margin: 0.5rem 0 0; padding: 0.75rem; border-radius: 10px;
+  background: #fafaf9; border: 1px solid var(--line);
+  font-size: 0.88rem; white-space: pre-wrap; font-family: inherit;
+}
+
 @media (max-width: 800px) {
   .grid-3, .grid-2 { grid-template-columns: 1fr; }
   .vs-grid { grid-template-columns: 1fr; }

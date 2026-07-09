@@ -4,16 +4,17 @@
 
 WhatsApp-native group trust software for informal African savings groups (chamas / ROSCAs / ASCAs). Soft ledger first — bank optional.
 
-## Features (MVP + innovation wedge)
+## Features
 
-- Create groups, members, contributions, payouts, fines
-- **Public cycle board** — share a read-only link (paid / pending / claims / next payout / Till)
-- **WhatsApp reminders** — single member + bulk nudge with amount + Till
-- **Payment confirm + dispute** — M-Pesa code, “claims paid” queue, treasurer confirm/reject
-- **Merry-go-round engine** — order, next highlighted, skip/reorder, **cycle calendar**
-- **Treasurer landing** — positioning, Free/Pro pricing, WhatsApp CTA (EN + Swahili)
-- PDF group statement for meetings
-- localStorage soft ledger (`chamaflow_v1`) — no KYC, no backend required
+- Soft ledger: members, contributions, payouts, fines (local-first)
+- **Public cycle board** + optional **live cloud board** (`#/live/CODE`)
+- **WhatsApp reminders** + payment claims (Nililipa)
+- **Merry-go-round** order, skip, cycle calendar
+- **Cloud multi-device** (Supabase) — treasurer + secretary share code
+- **Table banking loans** — issue, guarantors, repayments, pot math
+- **M-Pesa STK / partners** — Till/Paybill labels + Daraja STK API (demo without secrets)
+- Treasurer landing, Free/Pro pricing, EN + Swahili CTA
+- PDF group statement
 
 ## Run
 
@@ -22,6 +23,34 @@ npm install
 npm run dev
 ```
 
+## Cloud setup (optional)
+
+1. Create a free [Supabase](https://supabase.com) project  
+2. Run `supabase/schema.sql` in the SQL editor  
+3. Copy `.env.example` → `.env.local`:
+
+```bash
+VITE_SUPABASE_URL=https://xxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
+```
+
+4. Redeploy. Dashboard → **Enable cloud sync** → share the 8-char code with the secretary.
+
+## M-Pesa STK (optional)
+
+Set on **Vercel** (server-only — never `VITE_*`):
+
+| Env | Purpose |
+|-----|---------|
+| `MPESA_CONSUMER_KEY` | Daraja consumer key |
+| `MPESA_CONSUMER_SECRET` | Daraja secret |
+| `MPESA_SHORTCODE` | Paybill / till shortcode |
+| `MPESA_PASSKEY` | STK passkey |
+| `MPESA_ENV` | `sandbox` or `production` |
+| `MPESA_CALLBACK_URL` | Optional HTTPS callback |
+
+Without these, STK runs in **demo mode** (no real charge). Soft-ledger confirm still required.
+
 ## Deploy
 
 ```bash
@@ -29,16 +58,12 @@ npm run build
 vercel --prod
 ```
 
-## Public board
+## Monetization
 
-Treasurers copy a share link from the dashboard. Members open it on any phone — no login. The board is a snapshot encoded in the URL (local-first; refresh the link after updates).
-
-## Monetization (direction)
-
-- **Free:** small group, soft ledger, public board  
-- **Pro (~KSh 299–499/group/mo):** multi-admin, loans, bulk WA tools, long history  
+- **Free:** soft ledger, public board, small groups  
+- **Pro (~KSh 299–499/group/mo):** multi-admin cloud, loans, STK, bulk tools  
 - **Setup:** treasurer training fee  
 
 ## Stack
 
-React + TypeScript + Vite · lucide-react · jsPDF · Vercel
+React + TypeScript + Vite · Supabase (optional) · lucide-react · jsPDF · Vercel serverless (`/api/mpesa/*`)
