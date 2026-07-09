@@ -1,14 +1,17 @@
 # ChamaFlow
 
-Digital records for **Kenyan chamas** (merry-go-rounds / table banking):
+**Banks digitize money. We digitize the meeting and the trust.**
 
-- Members & payout order  
-- Contributions per cycle  
-- Payouts & fines  
-- Pot balance  
-- PDF group statement  
+WhatsApp-native group trust software for informal African savings groups (chamas / ROSCAs / ASCAs). Soft ledger first — bank optional.
 
-Data is stored in the browser (`localStorage`) for v1.
+## Features (MVP + innovation wedge)
+
+- Create groups, members, contributions, payouts, fines
+- **Public cycle board** — share a read-only link (paid / pending / next payout / Till)
+- **WhatsApp reminders** — single member + bulk nudge with amount + Till
+- **Merry-go-round engine** — clear order, next highlighted, skip & reorder
+- PDF group statement for meetings
+- localStorage soft ledger (`chamaflow_v1`) — no KYC, no backend required
 
 ## Run
 
@@ -24,8 +27,16 @@ npm run build
 vercel --prod
 ```
 
-## Monetization ideas
+## Public board
 
-- Free: 1 chama, 15 members  
-- Pro: KSh 299–499/chama/month  
-- Setup: KSh 1,000 for treasurer training  
+Treasurers copy a share link from the dashboard. Members open it on any phone — no login. The board is a snapshot encoded in the URL (local-first; refresh the link after updates).
+
+## Monetization (direction)
+
+- **Free:** small group, soft ledger, public board  
+- **Pro (~KSh 299–499/group/mo):** multi-admin, loans, bulk WA tools, long history  
+- **Setup:** treasurer training fee  
+
+## Stack
+
+React + TypeScript + Vite · lucide-react · jsPDF · Vercel
