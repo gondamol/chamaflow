@@ -42,13 +42,20 @@ export interface Fine {
   paid: boolean;
 }
 
+/** How often the group meets / advances the merry-go-round. */
+export type CycleFrequency = 'weekly' | 'biweekly' | 'monthly';
+
 export interface Chama {
   id: string;
   name: string;
   description: string;
   contributionAmount: number;
   currency: 'KES' | 'USD';
-  cycleDay: number; // day of month expected
+  cycleDay: number; // day of month expected (monthly mode)
+  /** Meeting cadence for the MGR calendar */
+  cycleFrequency: CycleFrequency;
+  /** Next contribution / payout meeting (YYYY-MM-DD) */
+  nextMeetingDate: string;
   currentCycle: number;
   mpesaTill: string;
   adminName: string;
@@ -59,6 +66,16 @@ export interface Chama {
   fines: Fine[];
   payoutOrder: string[]; // member ids in merry-go-round order
   createdAt: string;
+}
+
+/** One row on the merry-go-round calendar. */
+export interface CalendarSlot {
+  index: number;
+  memberId: string;
+  memberName: string;
+  expectedDate: string;
+  status: 'received' | 'next' | 'upcoming';
+  label: string;
 }
 
 export interface AppState {
@@ -76,6 +93,8 @@ export interface PublicBoardSnapshot {
   till: string;
   nextName: string | null;
   nextOrder: number | null;
+  /** Compact upcoming payouts for the share link */
+  upcoming?: { name: string; date: string; isNext: boolean }[];
   members: PublicBoardMember[];
   updatedAt: string;
 }

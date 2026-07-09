@@ -1,14 +1,19 @@
 import type {
   AppState,
   BoardMemberStatus,
+  CalendarSlot,
   Chama,
   Contribution,
   ContributionStatus,
+  CycleFrequency,
   Member,
   PublicBoardSnapshot,
 } from './types';
 
 const KEY = 'chamaflow_v1';
+
+/** Product WhatsApp CTA for treasurers. Set to 2547… when you have a live line. */
+export const CHAMAFLOW_SUPPORT_WA = '';
 
 export function uid(p = 'id') {
   return `${p}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-3)}`;
@@ -50,15 +55,27 @@ export function save(state: AppState) {
   localStorage.setItem(KEY, JSON.stringify(state));
 }
 
-/** Backfill contribution status / M-Pesa fields for older localStorage data. */
+/** Backfill contribution status / M-Pesa fields / calendar for older localStorage data. */
 export function migrateState(state: AppState): AppState {
   return {
     ...state,
-    chamas: (state.chamas || []).map((c) => ({
-      ...c,
-      contributions: (c.contributions || []).map((contrib) => normalizeContribution(contrib)),
-    })),
+    chamas: (state.chamas || []).map((c) => normalizeChama(c)),
   };
+}
+
+function normalizeChama(c: Chama): Chama {
+  const freq = normalizeFrequency(c.cycleFrequency);
+  return {
+    ...c,
+    cycleFrequency: freq,
+    nextMeetingDate: c.nextMeetingDate || today(),
+    contributions: (c.contributions || []).map((contrib) => normalizeContribution(contrib)),
+  };
+}
+
+function normalizeFrequency(f: unknown): CycleFrequency {
+  if (f === 'weekly' || f === 'biweekly' || f === 'monthly') return f;
+  return 'weekly';
 }
 
 function normalizeContribution(c: Partial<Contribution> & Pick<Contribution, 'id' | 'memberId' | 'amount' | 'date' | 'note' | 'cycle'>): Contribution {
@@ -122,6 +139,8 @@ function seed(): AppState {
     contributionAmount: 2000,
     currency: 'KES',
     cycleDay: 5,
+    cycleFrequency: 'weekly',
+    nextMeetingDate: today(),
     currentCycle: 1,
     mpesaTill: '123456',
     adminName: 'Demo Admin',
@@ -134,6 +153,121 @@ function seed(): AppState {
     createdAt: new Date().toISOString(),
   };
   return { chamas: [chama], activeChamaId: chama.id };
+}
+
+// ─── Merry-go-round calendar ───
+
+export function frequencyLabel(f: CycleFrequency): string {
+  if (f === 'weekly') return 'Weekly';
+  if (f === 'biweekly') return 'Every 2 weeks';
+  return 'Monthly';
+}
+
+export function frequencyDays(f: CycleFrequency): number {
+  if (f === 'weekly') return 7;
+  if (f === 'biweekly') return 14;
+  return 30;
+}
+
+export function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    const fallback = new Date();
+    fallback.setDate(fallback.getDate() + days);
+    return fallback.toISOString().slice(0, 10);
+  }
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export function formatMeetingDate(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-KE', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+/**
+ * Upcoming merry-go-round slots from next meeting date + frequency.
+ * Includes remaining recipients this round, then continues into the next full round.
+ */
+export function buildPayoutCalendar(chama: Chama, steps = 8): CalendarSlot[] {
+  const order = membersInPayoutOrder(chama);
+  if (order.length === 0) return [];
+
+  const next = nextPayoutMember(chama);
+  const nextIdx = next ? order.findIndex((m) => m.id === next.id) : 0;
+  const safeNext = nextIdx >= 0 ? nextIdx : 0;
+
+  // Remaining this round from next, then wrap into following rounds
+  const sequence: Member[] = [];
+  for (let i = safeNext; i < order.length; i++) sequence.push(order[i]);
+  let guard = 0;
+  while (sequence.length < steps && guard < steps * 3) {
+    for (const m of order) {
+      sequence.push(m);
+      if (sequence.length >= steps) break;
+    }
+    guard += 1;
+  }
+
+  const start = chama.nextMeetingDate || today();
+  const interval = frequencyDays(chama.cycleFrequency || 'weekly');
+  const slots: CalendarSlot[] = [];
+
+  for (let i = 0; i < Math.min(steps, sequence.length); i++) {
+    const m = sequence[i];
+    slots.push({
+      index: i,
+      memberId: m.id,
+      memberName: m.name,
+      expectedDate: addDays(start, i * interval),
+      status: i === 0 ? 'next' : 'upcoming',
+      label: i === 0 ? 'Next payout' : `Turn ${i + 1}`,
+    });
+  }
+  return slots;
+}
+
+/** Received this round (for calendar context above upcoming). */
+export function receivedThisRoundSlots(chama: Chama): CalendarSlot[] {
+  const order = membersInPayoutOrder(chama);
+  const paidOut = payoutReceivedSet(chama);
+  const chronological = [...chama.payouts].reverse();
+  return order
+    .filter((m) => paidOut.has(m.id))
+    .map((m, i) => {
+      const payout = chronological.find((p) => p.memberId === m.id);
+      return {
+        index: i,
+        memberId: m.id,
+        memberName: m.name,
+        expectedDate: payout?.date || '',
+        status: 'received' as const,
+        label: 'Received',
+      };
+    });
+}
+
+export function treasurerCtaMessage(lang: 'en' | 'sw' = 'en'): string {
+  if (lang === 'sw') {
+    return (
+      'Habari! Nataka *ChamaFlow* kwa chama yangu — public board, merry-go-round, na WhatsApp reminders. ' +
+      'Niambie jinsi ya kuanza (free).'
+    );
+  }
+  return (
+    'Hi! I want *ChamaFlow* for my chama — public cycle board, merry-go-round calendar, and WhatsApp reminders. ' +
+    'How do I start? (free for small groups)'
+  );
+}
+
+export function treasurerCtaUrl(lang: 'en' | 'sw' = 'en'): string {
+  return whatsappUrl(CHAMAFLOW_SUPPORT_WA || null, treasurerCtaMessage(lang));
 }
 
 export function isConfirmed(c: Contribution): boolean {
@@ -379,6 +513,7 @@ export function buildPublicBoard(chama: Chama): PublicBoardSnapshot {
   const orderIds = ordered.map((m) => m.id);
   const rest = chama.members.filter((m) => !orderIds.includes(m.id));
   const all = [...ordered, ...rest];
+  const cal = buildPayoutCalendar(chama, 4);
 
   return {
     v: 1,
@@ -389,6 +524,11 @@ export function buildPublicBoard(chama: Chama): PublicBoardSnapshot {
     till: chama.mpesaTill || '',
     nextName: next?.name ?? null,
     nextOrder: next ? orderIds.indexOf(next.id) + 1 : null,
+    upcoming: cal.map((s) => ({
+      name: s.memberName,
+      date: s.expectedDate,
+      isNext: s.status === 'next',
+    })),
     members: all.map((m) => {
       const paid = memberPaidInCycle(chama, m.id, chama.currentCycle);
       const status = memberCycleStatus(chama, m.id);
