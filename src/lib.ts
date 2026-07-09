@@ -65,10 +65,27 @@ export function migrateState(state: AppState): AppState {
 
 function normalizeChama(c: Chama): Chama {
   const freq = normalizeFrequency(c.cycleFrequency);
+  const mode = c.mode === 'mgr' || c.mode === 'table' || c.mode === 'hybrid' || c.mode === 'welfare'
+    ? c.mode
+    : 'hybrid';
+  const partner =
+    c.paymentPartner === 'mpesa_stk' || c.paymentPartner === 'bank_label' || c.paymentPartner === 'manual'
+      ? c.paymentPartner
+      : 'manual';
   return {
     ...c,
     cycleFrequency: freq,
     nextMeetingDate: c.nextMeetingDate || today(),
+    mpesaTill: c.mpesaTill || '',
+    mpesaPaybill: c.mpesaPaybill || '',
+    mpesaAccountRef: c.mpesaAccountRef || '',
+    paymentPartner: partner,
+    mode,
+    loans: c.loans || [],
+    loanRepayments: c.loanRepayments || [],
+    cloudShareCode: c.cloudShareCode ?? null,
+    cloudSyncedAt: c.cloudSyncedAt ?? null,
+    cloudRev: c.cloudRev || 0,
     contributions: (c.contributions || []).map((contrib) => normalizeContribution(contrib)),
   };
 }
@@ -135,7 +152,7 @@ function seed(): AppState {
   const chama: Chama = {
     id: uid('ch'),
     name: 'Umoja Sisters Chama',
-    description: 'Weekly merry-go-round demo',
+    description: 'Weekly merry-go-round + table banking demo',
     contributionAmount: 2000,
     currency: 'KES',
     cycleDay: 5,
@@ -143,14 +160,23 @@ function seed(): AppState {
     nextMeetingDate: today(),
     currentCycle: 1,
     mpesaTill: '123456',
+    mpesaPaybill: '',
+    mpesaAccountRef: 'UMOJA',
+    paymentPartner: 'manual',
+    mode: 'hybrid',
     adminName: 'Demo Admin',
     adminPhone: '0700000000',
     members,
     contributions,
     payouts: [],
     fines: [],
+    loans: [],
+    loanRepayments: [],
     payoutOrder: members.map((m) => m.id),
     createdAt: new Date().toISOString(),
+    cloudShareCode: null,
+    cloudSyncedAt: null,
+    cloudRev: 0,
   };
   return { chamas: [chama], activeChamaId: chama.id };
 }
@@ -303,11 +329,14 @@ export function pendingClaims(chama: Chama, cycle = chama.currentCycle): Contrib
   return chama.contributions.filter((c) => c.cycle === cycle && isClaimed(c));
 }
 
+/** Soft ledger pot: contributions + fines + loan repayments − MGR payouts − loan disbursements. */
 export function potTotal(chama: Chama) {
   const inAmt = chama.contributions.filter(isConfirmed).reduce((s, c) => s + c.amount, 0);
-  const outAmt = chama.payouts.reduce((s, c) => s + c.amount, 0);
-  const fines = chama.fines.filter((f) => f.paid).reduce((s, f) => s + f.amount, 0);
-  return inAmt + fines - outAmt;
+  const repay = (chama.loanRepayments || []).reduce((s, r) => s + r.amount, 0);
+  const fines = (chama.fines || []).filter((f) => f.paid).reduce((s, f) => s + f.amount, 0);
+  const outAmt = (chama.payouts || []).reduce((s, c) => s + c.amount, 0);
+  const loanOut = (chama.loans || []).reduce((s, l) => s + l.principal, 0);
+  return inAmt + fines + repay - outAmt - loanOut;
 }
 
 export function confirmContribution(
@@ -529,6 +558,7 @@ export function buildPublicBoard(chama: Chama): PublicBoardSnapshot {
       date: s.expectedDate,
       isNext: s.status === 'next',
     })),
+    liveCode: chama.cloudShareCode || null,
     members: all.map((m) => {
       const paid = memberPaidInCycle(chama, m.id, chama.currentCycle);
       const status = memberCycleStatus(chama, m.id);
@@ -571,9 +601,42 @@ export function publicBoardUrl(snapshot: PublicBoardSnapshot, origin = window.lo
 
 export function parseHashRoute():
   | { type: 'app' }
-  | { type: 'board'; token: string } {
+  | { type: 'board'; token: string }
+  | { type: 'live'; code: string } {
   const h = window.location.hash.replace(/^#/, '');
+  const live = h.match(/^\/?live\/([A-Za-z0-9]+)$/);
+  if (live?.[1]) return { type: 'live', code: live[1].toUpperCase() };
   const m = h.match(/^\/?board\/(.+)$/);
   if (m?.[1]) return { type: 'board', token: decodeURIComponent(m[1]) };
   return { type: 'app' };
+}
+
+export function emptyChamaDefaults(name: string): Omit<Chama, 'id' | 'createdAt'> {
+  return {
+    name: name.trim(),
+    description: '',
+    contributionAmount: 1000,
+    currency: 'KES',
+    cycleDay: 1,
+    cycleFrequency: 'weekly',
+    nextMeetingDate: today(),
+    currentCycle: 1,
+    mpesaTill: '',
+    mpesaPaybill: '',
+    mpesaAccountRef: '',
+    paymentPartner: 'manual',
+    mode: 'hybrid',
+    adminName: '',
+    adminPhone: '',
+    members: [],
+    contributions: [],
+    payouts: [],
+    fines: [],
+    loans: [],
+    loanRepayments: [],
+    payoutOrder: [],
+    cloudShareCode: null,
+    cloudSyncedAt: null,
+    cloudRev: 0,
+  };
 }

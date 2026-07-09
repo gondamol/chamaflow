@@ -45,6 +45,41 @@ export interface Fine {
 /** How often the group meets / advances the merry-go-round. */
 export type CycleFrequency = 'weekly' | 'biweekly' | 'monthly';
 
+/** Group operating mode — hybrid is most Kenyan chamas. */
+export type ChamaMode = 'mgr' | 'table' | 'hybrid' | 'welfare';
+
+export type LoanStatus = 'active' | 'repaid' | 'defaulted';
+
+export interface Loan {
+  id: string;
+  memberId: string;
+  principal: number;
+  /** Interest as percent of principal (e.g. 10 = 10%) */
+  interestRate: number;
+  interestAmount: number;
+  totalDue: number;
+  repaid: number;
+  issuedAt: string;
+  dueDate: string;
+  guarantorIds: string[];
+  note: string;
+  status: LoanStatus;
+  cycle: number;
+}
+
+export interface LoanRepayment {
+  id: string;
+  loanId: string;
+  memberId: string;
+  amount: number;
+  date: string;
+  mpesaCode: string;
+  note: string;
+}
+
+/** Payment rail preference — bank-agnostic progressive formalisation. */
+export type PaymentPartner = 'manual' | 'mpesa_stk' | 'bank_label';
+
 export interface Chama {
   id: string;
   name: string;
@@ -57,15 +92,29 @@ export interface Chama {
   /** Next contribution / payout meeting (YYYY-MM-DD) */
   nextMeetingDate: string;
   currentCycle: number;
+  /** Buy Goods Till (or Till label) */
   mpesaTill: string;
+  /** Optional Paybill number */
+  mpesaPaybill: string;
+  /** Account / chama ref for Paybill */
+  mpesaAccountRef: string;
+  paymentPartner: PaymentPartner;
+  mode: ChamaMode;
   adminName: string;
   adminPhone: string;
   members: Member[];
   contributions: Contribution[];
   payouts: Payout[];
   fines: Fine[];
+  loans: Loan[];
+  loanRepayments: LoanRepayment[];
   payoutOrder: string[]; // member ids in merry-go-round order
   createdAt: string;
+  /** Cloud multi-device share code (Supabase). Null = local only. */
+  cloudShareCode: string | null;
+  cloudSyncedAt: string | null;
+  /** Optimistic concurrency for cloud push */
+  cloudRev: number;
 }
 
 /** One row on the merry-go-round calendar. */
@@ -97,6 +146,8 @@ export interface PublicBoardSnapshot {
   upcoming?: { name: string; date: string; isNext: boolean }[];
   members: PublicBoardMember[];
   updatedAt: string;
+  /** Optional live cloud code if group uses multi-device */
+  liveCode?: string | null;
 }
 
 export type BoardMemberStatus = 'paid' | 'claimed' | 'pending';
