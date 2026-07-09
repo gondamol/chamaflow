@@ -3,3 +3,8 @@ dist
 .vercel
 .env
 *.local
+
+# Internal product docs — keep local only, never push to public repo
+docs/
+*.internal.md
+PRODUCT_VISION.md
