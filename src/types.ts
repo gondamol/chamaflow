@@ -55,3 +55,25 @@ export interface AppState {
   chamas: Chama[];
   activeChamaId: string | null;
 }
+
+/** Read-only snapshot encoded into a share link (no backend). */
+export interface PublicBoardSnapshot {
+  v: 1;
+  name: string;
+  cycle: number;
+  amount: number;
+  currency: string;
+  till: string;
+  nextName: string | null;
+  nextOrder: number | null;
+  members: PublicBoardMember[];
+  updatedAt: string;
+}
+
+export interface PublicBoardMember {
+  name: string;
+  paid: number;
+  status: 'paid' | 'pending';
+  order: number;
+  isNext: boolean;
+}
