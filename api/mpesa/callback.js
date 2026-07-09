@@ -1,6 +1,6 @@
-/** Daraja STK callback sink — log only for now (soft ledger still treasurer-confirmed). */
+/** Daraja STK callback sink — log only (soft ledger still treasurer-confirmed). */
 
-export async function POST(request: Request) {
+export async function POST(request) {
   try {
     const body = await request.json();
     console.log('[mpesa callback]', JSON.stringify(body).slice(0, 2000));

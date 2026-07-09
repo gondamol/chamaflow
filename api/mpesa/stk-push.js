@@ -1,19 +1,10 @@
 /**
  * Vercel serverless: Safaricom Daraja STK Push.
  * Secrets via env only (never VITE_*).
- *
- * Without credentials → returns demo mode JSON so the product still works.
+ * Without credentials → demo mode JSON.
  */
 
-type Body = {
-  phone?: string;
-  amount?: number;
-  accountRef?: string;
-  description?: string;
-  tillOrShortcode?: string;
-};
-
-function json(status: number, data: unknown) {
+function json(status, data) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { 'Content-Type': 'application/json' },
@@ -29,36 +20,35 @@ function configured() {
   );
 }
 
-async function getToken(base: string, key: string, secret: string) {
+async function getToken(base, key, secret) {
   const auth = Buffer.from(`${key}:${secret}`).toString('base64');
-  const res = await fetch(
-    `${base}/oauth/v1/generate?grant_type=client_credentials`,
-    { headers: { Authorization: `Basic ${auth}` } },
-  );
+  const res = await fetch(`${base}/oauth/v1/generate?grant_type=client_credentials`, {
+    headers: { Authorization: `Basic ${auth}` },
+  });
   if (!res.ok) throw new Error(`Token failed: ${res.status}`);
-  const data = (await res.json()) as { access_token?: string };
+  const data = await res.json();
   if (!data.access_token) throw new Error('No access_token');
   return data.access_token;
 }
 
 function timestamp() {
   const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
+  const p = (n) => String(n).padStart(2, '0');
   return (
     `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
     `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
   );
 }
 
-export async function POST(request: Request) {
-  let body: Body;
+export async function POST(request) {
+  let body;
   try {
-    body = (await request.json()) as Body;
+    body = await request.json();
   } catch {
     return json(400, { ok: false, error: 'Invalid JSON', mode: 'unavailable' });
   }
 
-  const phone = (body.phone || '').replace(/\D/g, '');
+  const phone = String(body.phone || '').replace(/\D/g, '');
   const amount = Math.round(Number(body.amount) || 0);
   if (!phone || amount < 1) {
     return json(400, { ok: false, error: 'phone and amount required', mode: 'unavailable' });
@@ -85,11 +75,11 @@ export async function POST(request: Request) {
   try {
     const token = await getToken(
       base,
-      process.env.MPESA_CONSUMER_KEY!,
-      process.env.MPESA_CONSUMER_SECRET!,
+      process.env.MPESA_CONSUMER_KEY,
+      process.env.MPESA_CONSUMER_SECRET,
     );
-    const shortcode = process.env.MPESA_SHORTCODE!;
-    const passkey = process.env.MPESA_PASSKEY!;
+    const shortcode = process.env.MPESA_SHORTCODE;
+    const passkey = process.env.MPESA_PASSKEY;
     const ts = timestamp();
     const password = Buffer.from(`${shortcode}${passkey}${ts}`).toString('base64');
     const callback =
@@ -112,12 +102,12 @@ export async function POST(request: Request) {
         PartyB: body.tillOrShortcode || shortcode,
         PhoneNumber: phone,
         CallBackURL: callback,
-        AccountReference: (body.accountRef || 'ChamaFlow').slice(0, 12),
-        TransactionDesc: (body.description || 'Chama contribution').slice(0, 13),
+        AccountReference: String(body.accountRef || 'ChamaFlow').slice(0, 12),
+        TransactionDesc: String(body.description || 'Chama contribution').slice(0, 13),
       }),
     });
 
-    const data = (await res.json()) as Record<string, string>;
+    const data = await res.json();
     if (!res.ok || data.ResponseCode !== '0') {
       return json(502, {
         ok: false,
@@ -134,7 +124,10 @@ export async function POST(request: Request) {
       customerMessage: data.CustomerMessage || 'Check your phone for M-Pesa PIN prompt.',
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'STK error';
-    return json(500, { ok: false, mode: 'live', error: msg });
+    return json(500, {
+      ok: false,
+      mode: 'live',
+      error: e instanceof Error ? e.message : 'STK error',
+    });
   }
 }
