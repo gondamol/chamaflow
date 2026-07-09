@@ -7,8 +7,9 @@ WhatsApp-native group trust software for informal African savings groups (chamas
 ## Features (MVP + innovation wedge)
 
 - Create groups, members, contributions, payouts, fines
-- **Public cycle board** — share a read-only link (paid / pending / next payout / Till)
+- **Public cycle board** — share a read-only link (paid / pending / claims / next payout / Till)
 - **WhatsApp reminders** — single member + bulk nudge with amount + Till
+- **Payment confirm + dispute** — M-Pesa code, “claims paid” queue, treasurer confirm/reject
 - **Merry-go-round engine** — clear order, next highlighted, skip & reorder
 - PDF group statement for meetings
 - localStorage soft ledger (`chamaflow_v1`) — no KYC, no backend required
