@@ -15,8 +15,11 @@ import {
   ChevronDown,
   SkipForward,
   Link2,
+  AlertCircle,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
-import type { Chama, Contribution, Fine, Member, Payout, PublicBoardSnapshot } from './types';
+import type { Chama, Fine, Member, Payout, PublicBoardSnapshot } from './types';
 import {
   load,
   save,
@@ -24,11 +27,15 @@ import {
   today,
   money,
   memberPaidInCycle,
+  memberClaimedInCycle,
+  memberCycleStatus,
   potTotal,
   nextPayoutMember,
   unpaidMembers,
+  pendingClaims,
   paymentReminderMessage,
   groupReminderMessage,
+  claimFollowUpMessage,
   whatsappUrl,
   buildPublicBoard,
   publicBoardUrl,
@@ -38,6 +45,9 @@ import {
   hasReceivedThisRound,
   movePayoutOrder,
   skipNextPayout,
+  makeContribution,
+  confirmContribution,
+  rejectClaim,
 } from './lib';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -89,13 +99,28 @@ function PublicBoardPage({ token }: { token: string }) {
   return <PublicBoardView board={board} />;
 }
 
+function statusBadgeClass(status: string) {
+  if (status === 'paid') return 'badge-ok';
+  if (status === 'claimed') return 'badge-claim';
+  return 'badge-warn';
+}
+
+function statusLabel(status: string) {
+  if (status === 'paid') return 'Paid ✓';
+  if (status === 'claimed') return 'Claims paid';
+  return 'Pending';
+}
+
 function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
   const paidCount = board.members.filter((m) => m.status === 'paid').length;
+  const claimedCount = board.members.filter((m) => m.status === 'claimed').length;
   const pending = board.members.filter((m) => m.status === 'pending');
   const updated = new Date(board.updatedAt);
   const updatedLabel = Number.isNaN(updated.getTime())
     ? board.updatedAt
     : updated.toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
+
+  const statusRank = (s: string) => (s === 'pending' ? 0 : s === 'claimed' ? 1 : 2);
 
   return (
     <div className="shell board-shell">
@@ -122,7 +147,7 @@ function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
         </p>
         <div className="grid-3" style={{ marginTop: '0.9rem' }}>
           <div className="stat">
-            <div className="stat-label">Paid this cycle</div>
+            <div className="stat-label">Paid (confirmed)</div>
             <div className="stat-value">
               {paidCount}/{board.members.length}
             </div>
@@ -140,17 +165,25 @@ function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
             </div>
           </div>
           <div className="stat">
-            <div className="stat-label">Still pending</div>
-            <div className="stat-value">{pending.length}</div>
+            <div className="stat-label">Pending / claims</div>
+            <div className="stat-value" style={{ fontSize: '1.05rem' }}>
+              {pending.length}
+              {claimedCount > 0 ? (
+                <span className="muted" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                  {' '}
+                  · {claimedCount} claim{claimedCount === 1 ? '' : 's'}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
         {board.till ? (
           <p className="pay-hint">
             Lipa na M-Pesa → Buy Goods / Paybill as agreed → Till <strong>{board.till}</strong> ·{' '}
-            {money(board.amount, board.currency)}
+            {money(board.amount, board.currency)}. Send your M-Pesa code to the treasurer.
           </p>
         ) : (
-          <p className="pay-hint">Pay cash or M-Pesa as your group agreed. Treasurer records it.</p>
+          <p className="pay-hint">Pay cash or M-Pesa as agreed. Treasurer confirms with M-Pesa code.</p>
         )}
         <p className="muted" style={{ fontSize: '0.8rem', marginBottom: 0 }}>
           Updated {updatedLabel} · Soft ledger (no bank wallet required)
@@ -159,18 +192,20 @@ function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
 
       <section className="card">
         <h2 style={{ fontSize: '1.1rem' }}>Who has paid?</h2>
-        <p className="muted">Same truth for every member — no notebook fights.</p>
+        <p className="muted">
+          Paid = treasurer confirmed. Claims paid = member says they paid, awaiting check. No notebook fights.
+        </p>
         <ul className="board-list">
           {[...board.members]
             .sort((a, b) => {
               if (a.isNext !== b.isNext) return a.isNext ? -1 : 1;
-              if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
+              if (a.status !== b.status) return statusRank(a.status) - statusRank(b.status);
               return (a.order || 99) - (b.order || 99);
             })
             .map((m) => (
               <li
                 key={`${m.name}-${m.order}`}
-                className={`board-row ${m.status === 'paid' ? 'is-paid' : 'is-pending'} ${m.isNext ? 'is-next' : ''}`}
+                className={`board-row is-${m.status} ${m.isNext ? 'is-next' : ''}`}
               >
                 <div className="board-row-main">
                   <span className="board-order">{m.order || '—'}</span>
@@ -181,12 +216,11 @@ function PublicBoardView({ board }: { board: PublicBoardSnapshot }) {
                     </div>
                     <div className="muted" style={{ fontSize: '0.85rem' }}>
                       {money(m.paid, board.currency)} of {money(board.amount, board.currency)}
+                      {m.status === 'claimed' ? ' · awaiting confirm' : ''}
                     </div>
                   </div>
                 </div>
-                <span className={`badge ${m.status === 'paid' ? 'badge-ok' : 'badge-warn'}`}>
-                  {m.status === 'paid' ? 'Paid ✓' : 'Pending'}
-                </span>
+                <span className={`badge ${statusBadgeClass(m.status)}`}>{statusLabel(m.status)}</span>
               </li>
             ))}
         </ul>
@@ -305,8 +339,12 @@ function TreasurerApp() {
             <ContributeView
               chama={chama}
               onUpdate={updateChama}
-              onDone={() => {
-                setFlash('Contribution recorded.');
+              onDone={(kind) => {
+                setFlash(
+                  kind === 'claim'
+                    ? 'Claim logged — confirm when you verify the M-Pesa code.'
+                    : 'Payment confirmed and added to pot.',
+                );
                 setView('chama');
               }}
             />
@@ -491,6 +529,8 @@ function ChamaDash({
         </div>
       </div>
 
+      <ClaimsQueueCard chama={chama} onUpdate={onUpdate} setFlash={setFlash} />
+
       <MerryGoRoundCard chama={chama} onUpdate={onUpdate} setFlash={setFlash} />
 
       <div className="card">
@@ -499,8 +539,8 @@ function ChamaDash({
             <h3 style={{ margin: 0 }}>This cycle contributions</h3>
             <p className="muted" style={{ margin: '0.25rem 0 0' }}>
               {unpaid.length === 0
-                ? 'Everyone has paid — ready for payout meeting.'
-                : `${unpaid.length} still pending. Nudge on WhatsApp.`}
+                ? 'Everyone confirmed — ready for payout meeting.'
+                : `${unpaid.length} not yet confirmed. Nudge or log a claim.`}
             </p>
           </div>
           {unpaid.length > 0 && (
@@ -519,15 +559,16 @@ function ChamaDash({
             <thead>
               <tr>
                 <th>Member</th>
-                <th>Paid</th>
+                <th>Confirmed</th>
                 <th>Status</th>
-                <th>Remind</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {chama.members.map((m) => {
                 const paid = memberPaidInCycle(chama, m.id, chama.currentCycle);
-                const ok = paid >= chama.contributionAmount;
+                const claimed = memberClaimedInCycle(chama, m.id, chama.currentCycle);
+                const status = memberCycleStatus(chama, m.id);
                 const isNext = next?.id === m.id;
                 return (
                   <tr key={m.id} className={isNext ? 'row-next' : undefined}>
@@ -535,26 +576,66 @@ function ChamaDash({
                       {m.name}
                       {isNext ? <span className="badge badge-next">Next</span> : null}
                     </td>
-                    <td>{money(paid, chama.currency)}</td>
                     <td>
-                      <span className={`badge ${ok ? 'badge-ok' : 'badge-warn'}`}>
-                        {ok ? 'Complete' : 'Pending'}
-                      </span>
+                      {money(paid, chama.currency)}
+                      {claimed > 0 ? (
+                        <div className="muted" style={{ fontSize: '0.78rem' }}>
+                          +{money(claimed, chama.currency)} claimed
+                        </div>
+                      ) : null}
                     </td>
                     <td>
-                      {!ok ? (
-                        <a
-                          className="btn btn-secondary btn-sm"
-                          href={whatsappUrl(m.phone, paymentReminderMessage(chama, m.name))}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={m.phone ? `WhatsApp ${m.phone}` : 'Open WhatsApp (pick contact)'}
-                        >
-                          <MessageCircle size={14} /> WA
-                        </a>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                      <span className={`badge ${statusBadgeClass(status)}`}>{statusLabel(status)}</span>
+                    </td>
+                    <td>
+                      <div className="toolbar" style={{ marginBottom: 0, gap: 4 }}>
+                        {status !== 'paid' ? (
+                          <>
+                            <a
+                              className="btn btn-secondary btn-sm"
+                              href={whatsappUrl(m.phone, paymentReminderMessage(chama, m.name))}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={m.phone ? `WhatsApp ${m.phone}` : 'Open WhatsApp'}
+                            >
+                              <MessageCircle size={14} /> WA
+                            </a>
+                            {status === 'pending' ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                title="Log Nililipa claim"
+                                onClick={() => {
+                                  const code = prompt(
+                                    `${m.name} claims paid — paste M-Pesa code (optional)`,
+                                    '',
+                                  );
+                                  if (code === null) return;
+                                  const c = makeContribution({
+                                    memberId: m.id,
+                                    amount: chama.contributionAmount,
+                                    cycle: chama.currentCycle,
+                                    mpesaCode: code,
+                                    note: 'Member claims paid (Nililipa)',
+                                    status: 'claimed',
+                                  });
+                                  onUpdate(chama.id, (ch) => ({
+                                    ...ch,
+                                    contributions: [c, ...ch.contributions],
+                                  }));
+                                  setFlash(
+                                    `Claim logged for ${m.name}. Confirm when you verify the M-Pesa code.`,
+                                  );
+                                }}
+                              >
+                                <AlertCircle size={14} /> Claims
+                              </button>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -563,6 +644,140 @@ function ChamaDash({
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ClaimsQueueCard({
+  chama,
+  onUpdate,
+  setFlash,
+}: {
+  chama: Chama;
+  onUpdate: (id: string, fn: (c: Chama) => Chama) => void;
+  setFlash: (s: string) => void;
+}) {
+  const claims = pendingClaims(chama);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [codeDraft, setCodeDraft] = useState('');
+
+  if (claims.length === 0) return null;
+
+  return (
+    <div className="card claims-card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <AlertCircle size={18} /> Payment claims to verify
+          </h3>
+          <p className="muted" style={{ margin: '0.25rem 0 0' }}>
+            Members said &quot;Nililipa!&quot; — confirm with M-Pesa code or reject. Claims do not enter the pot until
+            confirmed.
+          </p>
+        </div>
+        <span className="badge badge-claim">{claims.length} open</span>
+      </div>
+      <ul className="claims-list">
+        {claims.map((c) => {
+          const member = chama.members.find((m) => m.id === c.memberId);
+          const name = member?.name || 'Member';
+          const isEditing = editingId === c.id;
+          return (
+            <li key={c.id} className="claim-item">
+              <div className="claim-main">
+                <strong>{name}</strong>
+                <span className="muted">
+                  {money(c.amount, chama.currency)} · {c.date}
+                  {c.mpesaCode ? (
+                    <>
+                      {' '}
+                      · Code <code className="mpesa-code">{c.mpesaCode}</code>
+                    </>
+                  ) : (
+                    ' · no code yet'
+                  )}
+                </span>
+                {c.note ? <div className="muted" style={{ fontSize: '0.85rem' }}>{c.note}</div> : null}
+                {isEditing ? (
+                  <div className="field" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                    <label>M-Pesa code</label>
+                    <input
+                      value={codeDraft}
+                      onChange={(e) => setCodeDraft(e.target.value.toUpperCase())}
+                      placeholder="e.g. QH12ABCDE3"
+                      autoFocus
+                    />
+                  </div>
+                ) : null}
+              </div>
+              <div className="claim-actions">
+                {isEditing ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        onUpdate(chama.id, (ch) =>
+                          confirmContribution(ch, c.id, { mpesaCode: codeDraft || c.mpesaCode }),
+                        );
+                        setEditingId(null);
+                        setFlash(`${name} confirmed — pot updated.`);
+                      }}
+                    >
+                      <ShieldCheck size={14} /> Confirm
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setEditingId(null)}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        setEditingId(c.id);
+                        setCodeDraft(c.mpesaCode || '');
+                      }}
+                    >
+                      <ShieldCheck size={14} /> Confirm
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        const reason = prompt('Reject reason (optional)', 'Could not verify M-Pesa code');
+                        if (reason === null) return;
+                        onUpdate(chama.id, (ch) => rejectClaim(ch, c.id, reason || 'Rejected'));
+                        setFlash(`Claim for ${name} rejected.`);
+                      }}
+                    >
+                      <X size={14} /> Reject
+                    </button>
+                    {member?.phone ? (
+                      <a
+                        className="btn btn-secondary btn-sm"
+                        href={whatsappUrl(
+                          member.phone,
+                          claimFollowUpMessage(chama, name, c.mpesaCode),
+                        )}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <MessageCircle size={14} /> WA
+                      </a>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -744,25 +959,33 @@ function ContributeView({
 }: {
   chama: Chama;
   onUpdate: (id: string, fn: (c: Chama) => Chama) => void;
-  onDone: () => void;
+  onDone: (kind: 'confirm' | 'claim') => void;
 }) {
   const unpaid = unpaidMembers(chama);
+  const [mode, setMode] = useState<'confirm' | 'claim'>('confirm');
   const [memberId, setMemberId] = useState(unpaid[0]?.id || chama.members[0]?.id || '');
   const [amount, setAmount] = useState(chama.contributionAmount);
+  const [mpesaCode, setMpesaCode] = useState('');
   const [note, setNote] = useState('');
 
   const saveContrib = () => {
     if (!memberId) return alert('Add members first');
-    const c: Contribution = {
-      id: uid('c'),
+    if (amount <= 0) return alert('Enter amount');
+    const code = mpesaCode.trim().toUpperCase();
+    if (mode === 'confirm' && !code && !confirm('No M-Pesa code — confirm payment anyway?')) return;
+
+    const c = makeContribution({
       memberId,
       amount,
-      date: today(),
-      note,
       cycle: chama.currentCycle,
-    };
+      mpesaCode: code,
+      note:
+        note ||
+        (mode === 'claim' ? 'Member claims paid (Nililipa)' : code ? `M-Pesa ${code}` : 'Cash / confirmed'),
+      status: mode === 'claim' ? 'claimed' : 'confirmed',
+    });
     onUpdate(chama.id, (ch) => ({ ...ch, contributions: [c, ...ch.contributions] }));
-    onDone();
+    onDone(mode);
   };
 
   return (
@@ -770,16 +993,53 @@ function ContributeView({
       <h2>
         <Wallet size={20} style={{ verticalAlign: 'middle' }} /> Record contribution
       </h2>
-      <p className="muted">Soft ledger — money can stay M-Pesa/cash. Just record the truth.</p>
+      <p className="muted">
+        Soft ledger — money stays M-Pesa/cash. Confirm when you verified; log a claim when they say
+        &quot;Nililipa!&quot;
+      </p>
+
+      <div className="mode-toggle" role="tablist" aria-label="Contribution mode">
+        <button
+          type="button"
+          role="tab"
+          className={`mode-btn ${mode === 'confirm' ? 'is-active' : ''}`}
+          aria-selected={mode === 'confirm'}
+          onClick={() => setMode('confirm')}
+        >
+          <ShieldCheck size={16} /> Confirm payment
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`mode-btn ${mode === 'claim' ? 'is-active' : ''}`}
+          aria-selected={mode === 'claim'}
+          onClick={() => setMode('claim')}
+        >
+          <AlertCircle size={16} /> Member claims paid
+        </button>
+      </div>
+
+      {mode === 'claim' ? (
+        <p className="claim-hint">
+          Does not add to the pot until you confirm. Use when someone says they paid but you have not checked
+          M-Pesa yet.
+        </p>
+      ) : (
+        <p className="confirm-hint">
+          Counts in the pot immediately. Paste the M-Pesa code for the group record.
+        </p>
+      )}
+
       <div className="field">
         <label>Member</label>
         <select value={memberId} onChange={(e) => setMemberId(e.target.value)}>
           {chama.members.map((m) => {
+            const status = memberCycleStatus(chama, m.id);
             const paid = memberPaidInCycle(chama, m.id, chama.currentCycle);
-            const ok = paid >= chama.contributionAmount;
             return (
               <option key={m.id} value={m.id}>
-                {m.name} {ok ? '✓ paid' : `(${money(paid, chama.currency)})`}
+                {m.name} — {statusLabel(status)}
+                {paid > 0 ? ` (${money(paid, chama.currency)})` : ''}
               </option>
             );
           })}
@@ -790,11 +1050,24 @@ function ContributeView({
         <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
       </div>
       <div className="field">
-        <label>Note / M-Pesa code</label>
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. QWE12ABC34" />
+        <label>M-Pesa confirmation code {mode === 'confirm' ? '(recommended)' : '(if they sent one)'}</label>
+        <input
+          value={mpesaCode}
+          onChange={(e) => setMpesaCode(e.target.value.toUpperCase())}
+          placeholder="e.g. QH12ABCDE3"
+          autoCapitalize="characters"
+        />
+      </div>
+      <div className="field">
+        <label>Note (optional)</label>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder={mode === 'claim' ? 'e.g. Sent screenshot on WhatsApp' : 'e.g. Cash at meeting'}
+        />
       </div>
       <button type="button" className="btn btn-primary" onClick={saveContrib}>
-        Save contribution
+        {mode === 'claim' ? 'Log claim' : 'Confirm & save'}
       </button>
     </div>
   );

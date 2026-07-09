@@ -171,7 +171,47 @@ th { background: #faf7f2; color: var(--muted); font-size: 0.78rem; text-transfor
 }
 .board-row.is-next { border-color: #f59e0b; background: #fffbeb; }
 .board-row.is-paid { border-color: #a7f3d0; }
+.board-row.is-claimed { border-color: #fcd34d; background: #fffbeb; }
+.board-row.is-pending { border-color: #fecaca; }
 .board-row-main { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.badge-claim { background: #fef3c7; color: #b45309; }
+
+/* Claims queue */
+.claims-card {
+  border-color: #fcd34d;
+  background: linear-gradient(180deg, #fffbeb 0%, var(--surface) 48%);
+}
+.claims-list { list-style: none; margin: 0.75rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.claim-item {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap;
+  padding: 0.75rem; border-radius: 12px; border: 1px solid #fde68a; background: white;
+}
+.claim-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
+.claim-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
+.mpesa-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem; background: #f5f5f4; padding: 0.1rem 0.35rem; border-radius: 4px;
+}
+
+/* Contribute modes */
+.mode-toggle {
+  display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+  padding: 0.3rem; background: #f5f5f4; border-radius: 12px; border: 1px solid var(--line);
+}
+.mode-btn {
+  flex: 1; min-width: 140px; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
+  border: 0; background: transparent; border-radius: 10px; padding: 0.55rem 0.7rem;
+  font-weight: 600; cursor: pointer; color: var(--muted);
+}
+.mode-btn.is-active { background: white; color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.claim-hint {
+  margin: 0 0 0.85rem; padding: 0.6rem 0.75rem; border-radius: 10px;
+  background: #fffbeb; border: 1px solid #fde68a; font-size: 0.9rem; color: #92400e;
+}
+.confirm-hint {
+  margin: 0 0 0.85rem; padding: 0.6rem 0.75rem; border-radius: 10px;
+  background: #ecfdf5; border: 1px solid #a7f3d0; font-size: 0.9rem; color: #065f46;
+}
 .board-order {
   width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
   background: #f5f5f4; display: grid; place-items: center; font-weight: 800; font-size: 0.8rem; color: var(--muted);
